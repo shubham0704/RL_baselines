@@ -3,54 +3,52 @@ import torch.nn as nn
 import torch.optim as optim
 import gym
 import pdb
+import torch.nn.functional as F
 # Define the Gaussian policy network
 class GaussianPolicy(nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim, action_dim, fixed_std=True, method='p-pois'):
         super(GaussianPolicy, self).__init__()
-        self.mean = nn.Sequential(
-            nn.Linear(state_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, action_dim)
-        )
-        self.log_std = nn.Parameter(torch.zeros(action_dim))  # log of standard deviation (σ)
+        self.mean = nn.Linear(state_dim, action_dim)
+        # initialize mean parameters from N(0, 0.01)
+        nn.init.normal_(self.mean.weight, 0, 0.01)
+        self.method = method
+        self.fixed_std = fixed_std
+        if fixed_std:
+            self.log_std = torch.ones(action_dim)
+        else:
+            self.log_std = nn.Parameter(torch.zeros(action_dim))
+
+    def sample_theta(self):
+        std = torch.exp(self.log_std)
+        return torch.normal(self.mu, std)
     
     def forward(self, state):
         mean = self.mean(state)
-        std = torch.exp(self.log_std)
+        if self.fixed_std:
+            std = self.log_std#torch.ones_like(mean)
+        else:
+            std = torch.exp(self.log_std)
         return mean, std
 
     def sample_action(self, state):
         mean, std = self.forward(state)
         dist = torch.distributions.Normal(mean, std)
-        action = dist.sample()
+        if self.method == 'p-pois':
+            action = mean # p-pois has deterministic action
+        else:
+            action = dist.sample() # a-pois has stochastic action policy
         return action, dist.log_prob(action).sum()
 
-
-# Hyperpolicy: Gaussian with mean mu and diagonal covariance sigma^2
-class HyperPolicy(nn.Module):
-    def __init__(self, theta_dim):
-        super(HyperPolicy, self).__init__()
-        self.mu = nn.Parameter(torch.zeros(theta_dim))
-        self.log_sigma = nn.Parameter(torch.zeros(theta_dim))  # log of standard deviation
-
-    def sample_theta(self):
-        std = torch.exp(self.log_sigma)
-        return torch.normal(self.mu, std)
-
-    def log_prob(self, theta):
-        std = torch.exp(self.log_sigma)
-        dist = torch.distributions.Normal(self.mu, std)
-        return dist.log_prob(theta).sum()
-
     def renyi_divergence(self, other_hyperpolicy):
-        sigma1 = torch.exp(self.log_sigma)
-        sigma2 = torch.exp(other_hyperpolicy.log_sigma)
-
-        term1 = torch.sum((sigma1 / sigma2).pow(2))
-        term2 = torch.sum((self.mu - other_hyperpolicy.mu).pow(2) / sigma2.pow(2))
-        term3 = 2 * torch.sum(torch.log(sigma2 / sigma1))
+        std1 = torch.exp(self.log_std)
+        std2 = torch.exp(other_hyperpolicy.log_std)
+        term1 = torch.sum((std1 / std2).pow(2))
+        term2 = torch.sum((self.mu - other_hyperpolicy.mu).pow(2) / std2.pow(2))
+        term3 = 2 * torch.sum(torch.log(std2 / std1))
 
         return 0.5 * (term1 + term2 - term3 - len(self.mu))
+
+
 
 
 if __name__ == "__main__":
