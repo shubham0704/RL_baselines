@@ -62,7 +62,8 @@ def line_search(policy, policy_old, loss_fn, trajectories, initial_alpha=1.0, c1
 
 
 def parabolic_line_search(loss_fn, theta_0, grad_0, metric_inv, 
-                          max_ls_steps=30, tol_delta_L=1e-4, eta=0.5):
+                          max_ls_steps=30, tol_delta_L=1e-4, eta=0.5,
+                          min_alpha=1e-10, max_alpha=1.0):
     """
     Parabolic Line Search for finding optimal step size.
 
@@ -74,6 +75,8 @@ def parabolic_line_search(loss_fn, theta_0, grad_0, metric_inv,
     - max_ls_steps: Maximum number of line search iterations.
     - tol_delta_L: Tolerance for loss improvement.
     - eta: Constant for adjusting step size.
+    - min_alpha: Minimum allowed step size.
+    - max_alpha: Maximum allowed step size.
 
     Returns:
     - alpha_opt: Optimal step size found by the line search.
@@ -84,13 +87,14 @@ def parabolic_line_search(loss_fn, theta_0, grad_0, metric_inv,
     L_0 = loss_fn(theta_0).item()
     if not isinstance(metric_inv, torch.Tensor):
         metric_inv = torch.eye(theta_0.shape[0])
+    
     for l in range(max_ls_steps):
-        # Step size calculation
-        norm_grad = grad_0.T @ metric_inv @ grad_0
-        alpha_l = epsilon_1 / norm_grad**2
+        # Step size calculation with overflow protection
+        norm_grad = torch.clamp(grad_0.T @ metric_inv @ grad_0, min=1e-8)
+        alpha_l = torch.clamp(epsilon_1 / norm_grad, min=min_alpha, max=max_alpha)
         
         # Update parameters based on the current step size
-        theta_l = alpha_l * (metric_inv @ grad_0)
+        theta_l = theta_0 - alpha_l * (metric_inv @ grad_0)
         # Compute new loss and the loss difference
         L_l = loss_fn(theta_l).item()
         delta_L_l = L_l - L_0
@@ -103,7 +107,8 @@ def parabolic_line_search(loss_fn, theta_0, grad_0, metric_inv,
         if delta_L_l > (epsilon_1 * (1 - 2 * eta)) / (2 * eta):
             epsilon_1 = eta * epsilon_1
         else:
-            epsilon_1 = epsilon_1**2 / (2 * (epsilon_1 - delta_L_l))
+            denominator = max(2 * (epsilon_1 - delta_L_l), 1e-8)
+            epsilon_1 = epsilon_1**2 / denominator
 
         delta_L_k_1 = delta_L_l
         alpha_0 = alpha_l

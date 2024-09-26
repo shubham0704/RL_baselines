@@ -1,5 +1,5 @@
 import torch
-
+import pdb
 def p_pois_loss(trajectories, thetas, hyperpolicy_old, hyperpolicy_new, lambda_coef):
     N = len(trajectories)
     total_loss = 0
@@ -52,7 +52,8 @@ def a_pois_loss(trajectories, policy_old, policy_new, lambda_coef):
     
     # Calculate Renyi divergence between hyperpolicies
     ess = N / wt_sq_sum
-    ess_penalty = lambda_coef / torch.sqrt(ess)
+    ess_penalty = lambda_coef / (torch.sqrt(ess) + 1e-5)
+    ess_penalty = torch.where(ess_penalty > 1e5, torch.tensor(1e5), ess_penalty)
     # Surrogate loss with Renyi divergence penalty
     loss = total_loss / N - lambda_coef * ess_penalty
     return loss
