@@ -1,10 +1,10 @@
 import torch
 from losses import p_pois_loss, a_pois_loss
 from utils import collect_trajectories, parabolic_line_search
-from policy_network import HyperPolicy, GaussianPolicy
+from policy_network import GaussianPolicy
 import torch.optim as optim
 import gym
-
+import pdb
 
 import torch
 
@@ -13,8 +13,8 @@ def compute_exact_fisher_information_matrix(hyperpolicy):
     Compute the exact Fisher Information Matrix (FIM) for a Gaussian hyperpolicy.
     The FIM is diagonal, as described in the provided formula.
     """
-    mu = hyperpolicy.mu  # Mean of the Gaussian hyperpolicy
-    sigma = torch.exp(hyperpolicy.log_sigma)  # Standard deviation (since log_sigma is used)
+    mean = hyperpolicy.get_mean()  # Mean of the Gaussian hyperpolicy
+    sigma = torch.exp(hyperpolicy.get_log_std())  # Standard deviation (since log_sigma is used)
 
     # Construct the diagonal Fisher Information Matrix
     F_mu_inv = torch.diag(sigma**2)  # FIM for mean parameters (diag(sigma^2))
@@ -30,51 +30,70 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
                                   num_trajectories=10):
     
     for j in range(num_online_iterations):
-        # Sample theta from hyperpolicy
+        # Collect trajectories using old hyperpolicy
         trajectories = []
+        thetas = []
         for i in range(num_trajectories):
             theta = hyperpolicy_old.sample_theta()
-            hyperpolicy_new.set_theta(theta)
+            hyperpolicy_new.set_theta(theta)  # Set new policy to sample theta
             trajectory = collect_trajectories(env, hyperpolicy_new, 1)
             trajectories += trajectory
+            thetas.append(theta)
         
+        # Perform offline optimization
         for k in range(num_offline_iterations):
-            # Perform the exact FIM calculation for the Gaussian hyperpolicy
-            F_mu_inv, F_sigma_inv = compute_exact_fisher_information_matrix(hyperpolicy_new)
+            # Compute Fisher Information Matrix (FIM) for the new hyperpolicy
+            F_mean_inv, F_sigma_inv = compute_exact_fisher_information_matrix(hyperpolicy_new)
             
             # Define the P-POIS loss function
-            def loss_fn(theta):
-                return p_pois_loss(trajectories, hyperpolicy_old, hyperpolicy_new, lambda_coef)
+            def loss_fn(theta=None):
+                if theta is not None:
+                    hyperpolicy_new.set_theta(theta)
+                return p_pois_loss(trajectories, thetas, 
+                                   hyperpolicy_old, hyperpolicy_new, lambda_coef)
 
             # Compute the gradient of the P-POIS loss
-            loss = loss_fn(hyperpolicy_new)
-            hyperpolicy_new.zero_grad()
-            loss.backward(retain_graph=True)
-            
-            # Get the gradients
-            grad_mu = hyperpolicy_new.mu.grad
-            grad_sigma = hyperpolicy_new.log_sigma.grad  # Gradient of log_sigma
-            
-            # Update gradients using the natural gradient (inverse FIM)
-            natural_grad_mu = F_mu_inv @ grad_mu
-            natural_grad_sigma = F_sigma_inv @ grad_sigma
-            
-            # Perform line search to find optimal step size alpha_k
-            # Here, we pass the natural gradients for both mu and sigma
-            alpha_k = parabolic_line_search(loss_fn, [hyperpolicy_new.mu, hyperpolicy_new.log_sigma], 
-                                            [natural_grad_mu, natural_grad_sigma], 
-                                            [F_mu_inv, F_sigma_inv])
+            loss = loss_fn()
+            hyperpolicy_new.zero_grad()  # Clear previous gradients
+            loss.backward(retain_graph=True)  # Backpropagate the loss
 
-            # Perform gradient ascent update with the natural gradient and alpha_k
+            # Get gradients for mean and log_std
+            grad_mean = hyperpolicy_new.mean.weight.grad.flatten()  # Gradient for mean
+            grad_sigma = None
+            if not hyperpolicy_new.fixed_std:
+                grad_sigma = hyperpolicy_new.log_std.grad.flatten()  # Gradient for log_std if learnable
+
+            # Compute natural gradients using FIM
+            natural_grad_mean = F_mean_inv @ grad_mean
+            natural_grad_sigma = None
+            if grad_sigma is not None:
+                natural_grad_sigma = F_sigma_inv @ grad_sigma  # Natural gradient for log_std
+
+            # Perform parabolic line search for mean parameters
+            alpha_k_mean = parabolic_line_search(
+                loss_fn, hyperpolicy_new.get_mean(), grad_mean, F_mean_inv
+            )
+            
+            # If log_std is learnable, perform line search for it as well
+            if grad_sigma is not None:
+                alpha_k_sigma = parabolic_line_search(
+                    loss_fn, hyperpolicy_new.get_log_std(), grad_sigma, F_sigma_inv
+                )
+
+            # Update the mean parameters using the natural gradient and alpha_k
             with torch.no_grad():
-                hyperpolicy_new.mu += alpha_k * natural_grad_mu
-                hyperpolicy_new.log_sigma += alpha_k * natural_grad_sigma
+                mean_update = alpha_k_mean * natural_grad_mean
+                weight_update = mean_update.reshape(hyperpolicy_new.mean.weight.shape)
+                hyperpolicy_new.mean.weight += weight_update  # Update mean
+                if grad_sigma is not None:
+                    log_std_update = alpha_k_sigma * natural_grad_sigma
+                    log_std_update = log_std_update.reshape(hyperpolicy_new.log_std.shape)
+                    hyperpolicy_new.log_std += log_std_update  # Update log_std if learnable
 
-        # Update the old policy to match the new one
+        # Update the old policy to match the new one after offline iterations
         hyperpolicy_old.load_state_dict(hyperpolicy_new.state_dict())
         
-        print(f'Online Iteration {j}, Offline Iteration {k}, Loss: {loss.item()}, Alpha: {alpha_k}')
-
+        print(f'Online Iteration {j}, Offline Iteration {k}, Loss: {loss.item()}, Alpha_mean: {alpha_k_mean}, Alpha_sigma: {alpha_k_sigma if grad_sigma is not None else None}')
 
 
 def train_a_pois_with_line_search(env, policy_old, policy_new, 
@@ -129,11 +148,11 @@ if __name__ == '__main__':
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     # A-POIS training
-    # policy_old = GaussianPolicy(state_dim, action_dim)
-    # policy_new = GaussianPolicy(state_dim, action_dim)
+    # policy_old = GaussianPolicy(state_dim, action_dim, method='a-pois')
+    # policy_new = GaussianPolicy(state_dim, action_dim, method='a-pois')
     # train_a_pois_with_line_search(env, policy_old, policy_new)
 
     # P-POIS training
-    hyperpolicy_old = HyperPolicy(state_dim)
-    hyperpolicy_new = HyperPolicy(state_dim)
+    hyperpolicy_old = GaussianPolicy(state_dim, action_dim, method='p-pois')
+    hyperpolicy_new = GaussianPolicy(state_dim, action_dim, method='p-pois')
     train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new)

@@ -6,11 +6,12 @@ def collect_trajectories(env, policy, num_trajectories):
         state, _ = env.reset()
         traj = []
         done = False
-        while not done or truncated:
+        truncated = False
+        while not (done or truncated):
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             action, log_prob = policy.sample_action(state_tensor)
             next_state, reward, done, truncated, _ = env.step(torch.argmax(action.detach()).item())
-            traj.append((state, action, reward, log_prob))
+            traj.append((state, action, reward, log_prob)) # log_prob is 0 for p-pois since it is deterministic
             state = next_state
         trajectories.append(traj)
     return trajectories
@@ -81,15 +82,15 @@ def parabolic_line_search(loss_fn, theta_0, grad_0, metric_inv,
     epsilon_1 = 1
     delta_L_k_1 = -float('inf')
     L_0 = loss_fn(theta_0).item()
-
+    if not isinstance(metric_inv, torch.Tensor):
+        metric_inv = torch.eye(theta_0.shape[0])
     for l in range(max_ls_steps):
         # Step size calculation
-        norm_grad = torch.norm(grad_0 @ metric_inv(grad_0))
+        norm_grad = grad_0.T @ metric_inv @ grad_0
         alpha_l = epsilon_1 / norm_grad**2
         
         # Update parameters based on the current step size
-        theta_l = theta_0 + alpha_l * (metric_inv(grad_0))
-
+        theta_l = alpha_l * (metric_inv @ grad_0)
         # Compute new loss and the loss difference
         L_l = loss_fn(theta_l).item()
         delta_L_l = L_l - L_0
