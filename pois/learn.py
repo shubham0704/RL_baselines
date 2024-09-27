@@ -54,14 +54,11 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
 
             # Compute the gradient of the P-POIS loss
             loss = loss_fn()
-            print("loss", loss)
             # hyperpolicy_new.zero_grad()  # Clear previous gradients
             loss.backward(retain_graph=True)  # Backpropagate the loss
             
             # Get gradients for mean and log_std
             grad_mean = hyperpolicy_new.get_layer_gradients(hyperpolicy_new.mean)  # Gradient for mean
-            print("grad_mean", grad_mean)
-            print("hyperpolicy_new.mean", hyperpolicy_new.get_mean())
             grad_sigma = None
             if not hyperpolicy_new.fixed_std:
                 grad_sigma = hyperpolicy_new.get_layer_gradients(hyperpolicy_new.log_std)  # Gradient for log_std if learnable
@@ -76,8 +73,6 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
             alpha_k_mean = parabolic_line_search(
                 loss_fn, hyperpolicy_new.get_mean(), grad_mean, F_mean_inv
             )
-            print("alpha_k_mean", alpha_k_mean)
-            
             # If log_std is learnable, perform line search for it as well
             if grad_sigma is not None:
                 alpha_k_sigma = parabolic_line_search(
@@ -142,17 +137,10 @@ def train_a_pois_with_line_search(env, policy_old, policy_new,
                     param_shape = param.shape
                     param_size = param.numel()
                     param_grad = grad_0[start_idx:start_idx + param_size].view(param_shape)
-                    # if param_grad.any() == 0:
-                    #     print("param_grad", param_grad)
-                    #     print("multiplied", alpha_k * param_grad)
-                    #     print("param before", param)
                     param.add_(alpha_k * param_grad)
-                    # if param_grad.any() == 0:
-                    #     print("param after", param)
                     start_idx += param_size
             theta_new = torch.cat([param.clone().view(-1) for param in policy_new.parameters()]) 
-            # print("new theta", theta_new)
-        torch.nn.utils.clip_grad_norm_(policy_new.parameters(), max_norm=1.0)
+        # torch.nn.utils.clip_grad_norm_(policy_new.parameters(), max_norm=1.0)
         # Update the old policy to match the new one at the end of this iteration
         policy_old.load_state_dict(policy_new.state_dict())
         
@@ -163,12 +151,4 @@ if __name__ == '__main__':
     env = gym.make('CartPole-v1')
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
-    # A-POIS training
-    # policy_old = GaussianPolicy(state_dim, action_dim, method='a-pois')
-    # policy_new = GaussianPolicy(state_dim, action_dim, method='a-pois')
-    # train_a_pois_with_line_search(env, policy_old, policy_new)
-
-    # P-POIS training
-    hyperpolicy_old = GaussianPolicy(state_dim, action_dim, method='p-pois')
-    hyperpolicy_new = GaussianPolicy(state_dim, action_dim, method='p-pois')
-    train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new)
+    

@@ -11,13 +11,11 @@ def p_pois_loss(trajectories, thetas, hyperpolicy_old, hyperpolicy_new, lambda_c
         G = 0
         for state, action, reward, _ in reversed(traj):
             G = reward + G  # No discounting (gamma = 1 for simplicity)
-            # if any nan in theta set trace
-            if torch.isnan(theta).any():
-                pdb.set_trace()
             # Calculate the importance weight
             log_prob_new = hyperpolicy_new.log_prob(theta)
             log_prob_old = hyperpolicy_old.log_prob(theta)
-            w_rho = torch.clamp(torch.exp(log_prob_new - log_prob_old), min=1e-6, max=1e2)
+            w_rho = torch.exp(log_prob_new - log_prob_old)
+            # w_rho = torch.clamp(torch.exp(log_prob_new - log_prob_old), min=1e-6, max=1e2)
             all_weights.append(w_rho)
             wt_sum += w_rho
 
@@ -29,11 +27,9 @@ def p_pois_loss(trajectories, thetas, hyperpolicy_old, hyperpolicy_new, lambda_c
         G = 0
         for state, action, reward, _ in reversed(traj):
             G = reward + G
-
             # Use the normalized importance weight
             w_rho_normalized = normalized_weights[idx]
             idx += 1
-
             # Weighted return using normalized importance weights
             weighted_return = w_rho_normalized * G
             total_loss += weighted_return
@@ -44,10 +40,8 @@ def p_pois_loss(trajectories, thetas, hyperpolicy_old, hyperpolicy_new, lambda_c
 
     # Cap the penalty to avoid too high values
     ess_penalty = torch.where(ess_penalty > 1e5, torch.tensor(1e5, device=ess_penalty.device), ess_penalty)
-    print("ess_penalty", ess_penalty)
-    print("total_loss", total_loss)
     # Surrogate loss with Renyi divergence penalty
-    loss = total_loss / N - lambda_coef * ess_penalty
+    loss = total_loss - lambda_coef * ess_penalty
     
     return loss
 

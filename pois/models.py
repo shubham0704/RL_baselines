@@ -58,18 +58,18 @@ class GaussianPolicy(nn.Module):
                 total_param_size = 0
                 for i, param in enumerate(self.mean.parameters()):
                     param_value = theta_mean[total_param_size:total_param_size+param.numel()]
-                    param.copy_(param_value.view_as(param))
+                    param.copy_(param_value.view_as(param).clone())
                     total_param_size += param.numel()
             else:
                 total_param_size = 0
                 for i, param in enumerate(self.mean.parameters()):
                     param_value = theta_mean[total_param_size:total_param_size+param.numel()]
-                    param.copy_(param_value.view_as(param))
+                    param.copy_(param_value.view_as(param).clone())
                     total_param_size += param.numel()
                 total_param_size = 0   
                 for i, param in enumerate(self.log_std):
                     param_value = theta_log_std[total_param_size:total_param_size+param.numel()]
-                    param.copy_(param_value.view_as(param))
+                    param.copy_(param_value.view_as(param).clone())
                 
     @staticmethod
     def get_layer_gradients(layer):
@@ -83,7 +83,7 @@ class GaussianPolicy(nn.Module):
         total_param_size = 0
         for i, param in enumerate(layer.parameters()):
             param_value = grads[total_param_size:total_param_size+param.numel()]
-            param.copy_(param_value.view_as(param))
+            param.add_(param_value.view_as(param).detach().clone())
             total_param_size += param.numel()
                 
     def forward(self, state):
@@ -167,18 +167,18 @@ class MLPPolicy(nn.Module):
                 total_param_size = 0
                 for i, param in enumerate(self.mean.parameters()):
                     param_value = theta_mean[total_param_size:total_param_size+param.numel()]
-                    param.copy_(param_value.view_as(param))
+                    param.copy_(param_value.view_as(param).clone())
                     total_param_size += param.numel()
             else:
                 total_param_size = 0
                 for i, param in enumerate(self.mean.parameters()):
                     param_value = theta_mean[total_param_size:total_param_size+param.numel()]
-                    param.copy_(param_value.view_as(param))
+                    param.copy_(param_value.view_as(param).clone())
                     total_param_size += param.numel()
                 total_param_size = 0   
                 for i, param in enumerate(self.log_std):
                     param_value = theta_log_std[total_param_size:total_param_size+param.numel()]
-                    param.copy_(param_value.view_as(param))
+                    param.copy_(param_value.view_as(param).clone())
                 
     def forward(self, state):
         mean = self.mean(state)
@@ -210,24 +210,10 @@ class MLPPolicy(nn.Module):
         total_param_size = 0
         for i, param in enumerate(layer.parameters()):
             param_value = grads[total_param_size:total_param_size+param.numel()]
-            param.copy_(param_value.view_as(param))
+            param.add_(param_value.view_as(param).detach().clone())
             total_param_size += param.numel()
 
 model_factory = {
     'linear': GaussianPolicy,
     'mlp': MLPPolicy
 }
-
-
-if __name__ == "__main__":
-    # define the cartpole environment
-    env = gym.make("CartPole-v1")
-    # Initialize the policy
-    state_dim = env.observation_space.shape[0]
-    # check if the action space is discrete or continuous
-    if isinstance(env.action_space, gym.spaces.Discrete):
-        action_dim = env.action_space.n # Discrete actions
-    else:
-        action_dim = env.action_space.shape[0] # Continuous actions
-    policy = GaussianPolicy(state_dim, action_dim)
-    

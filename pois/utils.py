@@ -90,7 +90,7 @@ def parabolic_line_search(loss_fn, theta_0, grad_0, metric_inv,
     
     for l in range(max_ls_steps):
         # Step size calculation with overflow protection
-        norm_grad = torch.clamp(grad_0.T @ metric_inv @ grad_0, min=1e-8)
+        norm_grad = torch.clamp((grad_0 * (metric_inv @ grad_0)).sum(dim=-1), min=1e-8)
         alpha_l = torch.clamp(epsilon_1 / norm_grad, min=min_alpha, max=max_alpha)
         
         # Update parameters based on the current step size

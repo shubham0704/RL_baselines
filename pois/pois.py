@@ -7,7 +7,7 @@ import os
 
 
 class POIS:
-    def __init__(self, env, model_type='mlp', save_dir='./artifacts', pois_type='a-pois'):
+    def __init__(self, env, model_type='mlp', save_dir='./artifacts', method='a-pois'):
         self.env = env
         self.model_type = model_type
         self.state_dim = env.observation_space.shape[0]
@@ -15,15 +15,15 @@ class POIS:
             self.action_dim = env.action_space.shape[0] 
         else: # discrete action space
             self.action_dim = env.action_space.n
-        self.policy_old = model_factory[model_type](self.state_dim, self.action_dim)
-        self.policy_new = model_factory[model_type](self.state_dim, self.action_dim)
+        self.policy_old = model_factory[model_type](self.state_dim, self.action_dim, method=method)
+        self.policy_new = model_factory[model_type](self.state_dim, self.action_dim, method=method)
         if not os.path.exists(save_dir):
             os.makedirs(save_dir, exist_ok=True)
-        self.save_path = os.path.join(save_dir, pois_type+'_'+model_type+".pth")
-        self.pois_type = pois_type
+        self.save_path = os.path.join(save_dir, method+'_'+model_type+".pth")
+        self.method = method
     def learn(self, lambda_coef, 
               num_iterations=10, episodes_per_iteration=10, num_offline_iterations=10):
-        if self.pois_type == 'a-pois':
+        if self.method == 'a-pois':
             self.policy_new = train_a_pois_with_line_search(self.env, 
                                                         self.policy_old, 
                                                         self.policy_new, 
@@ -46,7 +46,7 @@ class POIS:
 
 if __name__ == "__main__":
     env = gym.make("CartPole-v1")
-    model = POIS(env, model_type='mlp', save_dir='./artifacts', pois_type='p-pois')
+    model = POIS(env, model_type='linear', save_dir='./artifacts', method='p-pois')
     model.learn(lambda_coef=0.1, 
                 num_iterations=10, 
                 episodes_per_iteration=10, 
