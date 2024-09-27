@@ -17,36 +17,74 @@ class GaussianPolicy(nn.Module):
         self.method = method
         self.fixed_std = fixed_std
         if method == 'p-pois':
+            flatten_param_size = 0
+            for param in self.mean.parameters():
+                flatten_param_size += param.numel()
             if fixed_std:
-                self.log_std = torch.ones_like(self.mean.weight)
+                self.log_std = torch.ones(flatten_param_size)
             else:
-                self.log_std = nn.Parameter(torch.ones_like(self.mean.weight))
+                self.log_std = nn.Parameter(torch.ones(flatten_param_size))
         else: 
             if fixed_std:
                 self.log_std = torch.ones(action_dim)
             else:
                 self.log_std = nn.Parameter(torch.ones(action_dim))
                 
+   
     def get_mean(self):
-        return self.mean.weight.flatten()
+        theta = []
+        for param in self.mean.parameters():
+            theta.append(param.flatten())
+        theta = torch.cat(theta)
+        return theta
     
     def get_log_std(self):
         return self.log_std.flatten()
     
+    
     def sample_theta(self):
-        return torch.normal(self.mean.weight, self.log_std)
+        # get all the parameters from the self.mean layer
+        theta = self.get_mean()
+        return torch.normal(theta, self.log_std)
     
     def log_prob(self, theta):
-        dist = torch.distributions.Normal(self.mean.weight, self.log_std)
-        return dist.log_prob(theta).sum()
+        mean = self.get_mean()
+        dist = torch.distributions.Normal(mean, self.log_std)
+        return dist.log_prob(theta).mean()
     
     def set_theta(self, theta_mean, theta_log_std=None):
         with torch.no_grad():
             if self.fixed_std:
-                self.mean.weight.copy_(theta_mean.view_as(self.mean.weight))
+                total_param_size = 0
+                for i, param in enumerate(self.mean.parameters()):
+                    param_value = theta_mean[total_param_size:total_param_size+param.numel()]
+                    param.copy_(param_value.view_as(param))
+                    total_param_size += param.numel()
             else:
-                self.mean.weight.copy_(theta_mean.view_as(self.mean.weight))
-                self.log_std.copy_(theta_log_std.view_as(self.mean.weight))
+                total_param_size = 0
+                for i, param in enumerate(self.mean.parameters()):
+                    param_value = theta_mean[total_param_size:total_param_size+param.numel()]
+                    param.copy_(param_value.view_as(param))
+                    total_param_size += param.numel()
+                total_param_size = 0   
+                for i, param in enumerate(self.log_std):
+                    param_value = theta_log_std[total_param_size:total_param_size+param.numel()]
+                    param.copy_(param_value.view_as(param))
+                
+    @staticmethod
+    def get_layer_gradients(layer):
+        grads = []  
+        for name, param in layer.named_parameters():
+            grads.append(param.grad.flatten())
+        return torch.cat(grads)
+    
+    @staticmethod
+    def layer_assign_gradients(layer, grads):
+        total_param_size = 0
+        for i, param in enumerate(layer.parameters()):
+            param_value = grads[total_param_size:total_param_size+param.numel()]
+            param.copy_(param_value.view_as(param))
+            total_param_size += param.numel()
                 
     def forward(self, state):
         mean = self.mean(state)
@@ -65,6 +103,8 @@ class GaussianPolicy(nn.Module):
             dist = torch.distributions.Normal(mean, std)
             action = dist.sample() # a-pois has stochastic action policy
             return action, dist.log_prob(action).sum()
+        
+        
         
 class MLPPolicy(nn.Module):
     def __init__(self, state_dim, action_dim, fixed_std=True, method='p-pois'):
@@ -115,22 +155,29 @@ class MLPPolicy(nn.Module):
         return torch.normal(theta, self.log_std)
     
     def log_prob(self, theta):
-        mean = self.mean(theta)
+        mean = self.get_mean()
+        if torch.isnan(mean).any():
+            pdb.set_trace()
         dist = torch.distributions.Normal(mean, self.log_std)
-        return dist.log_prob(theta).sum()
+        return dist.log_prob(theta).mean()
     
     def set_theta(self, theta_mean, theta_log_std=None):
         with torch.no_grad():
             if self.fixed_std:
+                total_param_size = 0
                 for i, param in enumerate(self.mean.parameters()):
-                    param_value = theta_mean[i*param.numel:(i+1)*param.numel]
+                    param_value = theta_mean[total_param_size:total_param_size+param.numel()]
                     param.copy_(param_value.view_as(param))
+                    total_param_size += param.numel()
             else:
+                total_param_size = 0
                 for i, param in enumerate(self.mean.parameters()):
-                    param_value = theta_mean[i*param.numel:(i+1)*param.numel]
+                    param_value = theta_mean[total_param_size:total_param_size+param.numel()]
                     param.copy_(param_value.view_as(param))
+                    total_param_size += param.numel()
+                total_param_size = 0   
                 for i, param in enumerate(self.log_std):
-                    param_value = theta_log_std[i*param.numel:(i+1)*param.numel]
+                    param_value = theta_log_std[total_param_size:total_param_size+param.numel()]
                     param.copy_(param_value.view_as(param))
                 
     def forward(self, state):
@@ -150,9 +197,24 @@ class MLPPolicy(nn.Module):
             dist = torch.distributions.Normal(mean, std)
             action = dist.sample() # a-pois has stochastic action policy
             return action, dist.log_prob(action).sum()
+    
+    @staticmethod
+    def get_layer_gradients(layer):
+        grads = []  
+        for name, param in layer.named_parameters():
+            grads.append(param.grad.flatten())
+        return torch.cat(grads)
+    
+    @staticmethod
+    def layer_assign_gradients(layer, grads):
+        total_param_size = 0
+        for i, param in enumerate(layer.parameters()):
+            param_value = grads[total_param_size:total_param_size+param.numel()]
+            param.copy_(param_value.view_as(param))
+            total_param_size += param.numel()
 
 model_factory = {
-    'gaussian': GaussianPolicy,
+    'linear': GaussianPolicy,
     'mlp': MLPPolicy
 }
 

@@ -25,15 +25,15 @@ def compute_exact_fisher_information_matrix(hyperpolicy):
 
 def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new, 
                                   gamma=1.0, lambda_coef=0.01, 
-                                  num_online_iterations=10, 
+                                  num_iterations=10, 
                                   num_offline_iterations=10,
-                                  num_trajectories=10):
+                                  episodes_per_iteration=10):
     
-    for j in range(num_online_iterations):
+    for j in range(num_iterations):
         # Collect trajectories using old hyperpolicy
         trajectories = []
         thetas = []
-        for i in range(num_trajectories):
+        for i in range(episodes_per_iteration):
             theta = hyperpolicy_old.sample_theta()
             hyperpolicy_new.set_theta(theta)  # Set new policy to sample theta
             trajectory = collect_trajectories(env, hyperpolicy_new, 1)
@@ -54,14 +54,17 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
 
             # Compute the gradient of the P-POIS loss
             loss = loss_fn()
-            hyperpolicy_new.zero_grad()  # Clear previous gradients
+            print("loss", loss)
+            # hyperpolicy_new.zero_grad()  # Clear previous gradients
             loss.backward(retain_graph=True)  # Backpropagate the loss
-
+            
             # Get gradients for mean and log_std
-            grad_mean = hyperpolicy_new.mean.weight.grad.flatten()  # Gradient for mean
+            grad_mean = hyperpolicy_new.get_layer_gradients(hyperpolicy_new.mean)  # Gradient for mean
+            print("grad_mean", grad_mean)
+            print("hyperpolicy_new.mean", hyperpolicy_new.get_mean())
             grad_sigma = None
             if not hyperpolicy_new.fixed_std:
-                grad_sigma = hyperpolicy_new.log_std.grad.flatten()  # Gradient for log_std if learnable
+                grad_sigma = hyperpolicy_new.get_layer_gradients(hyperpolicy_new.log_std)  # Gradient for log_std if learnable
 
             # Compute natural gradients using FIM
             natural_grad_mean = F_mean_inv @ grad_mean
@@ -73,6 +76,7 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
             alpha_k_mean = parabolic_line_search(
                 loss_fn, hyperpolicy_new.get_mean(), grad_mean, F_mean_inv
             )
+            print("alpha_k_mean", alpha_k_mean)
             
             # If log_std is learnable, perform line search for it as well
             if grad_sigma is not None:
@@ -82,13 +86,15 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
 
             # Update the mean parameters using the natural gradient and alpha_k
             with torch.no_grad():
-                mean_update = alpha_k_mean * natural_grad_mean
-                weight_update = mean_update.reshape(hyperpolicy_new.mean.weight.shape)
-                hyperpolicy_new.mean.weight += weight_update  # Update mean
+                weight_update = alpha_k_mean * natural_grad_mean
+                # weight_update = mean_update.reshape(hyperpolicy_new.mean.weight.shape)
+                hyperpolicy_new.layer_assign_gradients(hyperpolicy_new.mean, weight_update)
+                #hyperpolicy_new.mean.weight += weight_update  # Update mean
                 if grad_sigma is not None:
-                    log_std_update = alpha_k_sigma * natural_grad_sigma
-                    log_std_update = log_std_update.reshape(hyperpolicy_new.log_std.shape)
-                    hyperpolicy_new.log_std += log_std_update  # Update log_std if learnable
+                    weight_update = alpha_k_sigma * natural_grad_sigma
+                    # log_std_update = log_std_update.reshape(hyperpolicy_new.log_std.shape)
+                    hyperpolicy_new.layer_assign_gradients(hyperpolicy_new.log_std, weight_update)
+                    #hyperpolicy_new.log_std += log_std_update  # Update log_std if learnable
 
         # Update the old policy to match the new one after offline iterations
         hyperpolicy_old.load_state_dict(hyperpolicy_new.state_dict())
@@ -98,14 +104,15 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
 
 def train_a_pois_with_line_search(env, policy_old, policy_new, 
                                 gamma=1.0, lambda_coef=0.01, 
-                                num_online_iterations=10, 
+                                num_iterations=10, 
                                 num_offline_iterations=10,
-                                num_trajectories=10):    
+                                episodes_per_iteration=10):    
     optimizer = torch.optim.Adam(policy_new.parameters(), lr=1e-3)  # Initial learning rate
     
-    for j in range(num_online_iterations):
+    for j in range(num_iterations):
         # Online phase: Collect trajectories using the current policy
-        trajectories = collect_trajectories(env, policy_old, num_trajectories=10)
+        trajectories = collect_trajectories(env, policy_old, 
+                                            episodes_per_iteration=episodes_per_iteration)
 
         for k in range(num_offline_iterations):
             # Compute the gradient of the A-POIS loss w.r.t. policy parameters

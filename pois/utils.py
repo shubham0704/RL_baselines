@@ -1,8 +1,8 @@
 import torch
 import pdb
-def collect_trajectories(env, policy, num_trajectories):
+def collect_trajectories(env, policy, episodes_per_iteration):
     trajectories = []
-    for _ in range(num_trajectories):
+    for _ in range(episodes_per_iteration):
         state, _ = env.reset()
         traj = []
         done = False
@@ -98,7 +98,6 @@ def parabolic_line_search(loss_fn, theta_0, grad_0, metric_inv,
         # Compute new loss and the loss difference
         L_l = loss_fn(theta_l).item()
         delta_L_l = L_l - L_0
-        
         # Check if the improvement is within tolerance
         if delta_L_l < delta_L_k_1 + tol_delta_L:
             return alpha_0 if l == 0 else alpha_l
