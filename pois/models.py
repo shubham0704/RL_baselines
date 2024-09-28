@@ -4,7 +4,7 @@ import torch.optim as optim
 import gym
 import pdb
 import torch.nn.functional as F
-
+import numpy as np
 
 
 # Define the Gaussian policy network
@@ -14,21 +14,23 @@ class GaussianPolicy(nn.Module):
         self.mean = nn.Linear(state_dim, action_dim, bias=False)
         # initialize mean parameters from N(0, 0.01)
         nn.init.normal_(self.mean.weight, 0, 0.01)
+        device = torch.device('cpu')
         self.method = method
         self.fixed_std = fixed_std
+        self.action_dim = action_dim
         if method == 'p-pois':
             flatten_param_size = 0
             for param in self.mean.parameters():
                 flatten_param_size += param.numel()
             if fixed_std:
-                self.log_std = torch.ones(flatten_param_size)
+                self.log_std = torch.ones(flatten_param_size).to(device)
             else:
-                self.log_std = nn.Parameter(torch.ones(flatten_param_size))
+                self.log_std = nn.Parameter(torch.ones(flatten_param_size).to(device))
         else: 
             if fixed_std:
-                self.log_std = torch.ones(action_dim)
+                self.log_std = torch.ones(action_dim).to(device)
             else:
-                self.log_std = nn.Parameter(torch.ones(action_dim))
+                self.log_std = nn.Parameter(torch.ones(action_dim).to(device))
                 
    
     def get_mean(self):
@@ -104,8 +106,40 @@ class GaussianPolicy(nn.Module):
             action = dist.sample() # a-pois has stochastic action policy
             return action, dist.log_prob(action).sum()
         
+    def predict(self, observations, states=None, episode_starts=None, deterministic=True):
+        """
+        Predict actions for given observations.
+        :param observations: (np.ndarray or torch.Tensor) The input observations.
+        :param states: (Optional) The last states (used in recurrent policies).
+        :param episode_starts: (Optional) Indicates the start of episodes.
+        :param deterministic: (bool) Whether to use deterministic actions.
+        :return: (np.ndarray, Optional) The predicted actions and the next states.
+        """
+        # Convert observations to torch tensors if they are not already
+        if not isinstance(observations, torch.Tensor):
+            observations = torch.FloatTensor(observations)
+        if observations.dim() == 1:
+            observations = observations.unsqueeze(0)  # Add batch dimension if needed
+
+        # Pass observations through the network to get mean and std
+        with torch.no_grad():
+            mean, std = self.forward(observations)
+
+        # Determine action based on deterministic flag and method
+        if deterministic or self.method == 'p-pois':
+            action = mean
+        else:
+            dist = torch.distributions.Normal(mean, std)
+            action = dist.sample()
+
+        action = torch.argmax(action, dim=1)
+        # Convert action to numpy array
+        action = action.detach().cpu().numpy()
+        # Ensure action is a 1D array, especially when using vectorized environments
+        action = np.atleast_1d(action)
         
-        
+        return action, states
+
 class MLPPolicy(nn.Module):
     def __init__(self, state_dim, action_dim, fixed_std=True, method='p-pois'):
         super(MLPPolicy, self).__init__()
@@ -122,7 +156,7 @@ class MLPPolicy(nn.Module):
         for layer in self.mean:
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_uniform_(layer.weight)
-
+        device = torch.device('cpu')
         self.method = method
         self.fixed_std = fixed_std
         if method == 'p-pois':
@@ -130,14 +164,14 @@ class MLPPolicy(nn.Module):
             for param in self.mean.parameters():
                 flatten_param_size += param.numel()
             if fixed_std:
-                self.log_std = torch.ones(flatten_param_size)
+                self.log_std = torch.ones(flatten_param_size).to(device)
             else:
-                self.log_std = nn.Parameter(torch.ones(flatten_param_size))
+                self.log_std = nn.Parameter(torch.ones(flatten_param_size).to(device))
         else: 
             if fixed_std:
-                self.log_std = torch.ones(action_dim)
+                self.log_std = torch.ones(action_dim).to(device)
             else:
-                self.log_std = nn.Parameter(torch.ones(action_dim))
+                self.log_std = nn.Parameter(torch.ones(action_dim).to(device))
                 
     def get_mean(self):
         theta = []
@@ -212,6 +246,40 @@ class MLPPolicy(nn.Module):
             param_value = grads[total_param_size:total_param_size+param.numel()]
             param.add_(param_value.view_as(param).detach().clone())
             total_param_size += param.numel()
+         
+    def predict(self, observations, states=None, episode_starts=None, deterministic=True):
+        """
+        Predict actions for given observations.
+        :param observations: (np.ndarray or torch.Tensor) The input observations.
+        :param states: (Optional) The last states (used in recurrent policies).
+        :param episode_starts: (Optional) Indicates the start of episodes.
+        :param deterministic: (bool) Whether to use deterministic actions.
+        :return: (np.ndarray, Optional) The predicted actions and the next states.
+        """
+        # Convert observations to torch tensors if they are not already
+        if not isinstance(observations, torch.Tensor):
+            observations = torch.FloatTensor(observations)
+        if observations.dim() == 1:
+            observations = observations.unsqueeze(0)  # Add batch dimension if needed
+
+        # Pass observations through the network to get mean and std
+        with torch.no_grad():
+            mean, std = self.forward(observations)
+
+        # Determine action based on deterministic flag and method
+        if deterministic or self.method == 'p-pois':
+            action = mean
+        else:
+            dist = torch.distributions.Normal(mean, std)
+            action = dist.sample()
+
+        action = torch.argmax(action, dim=1)
+        # Convert action to numpy array
+        action = action.detach().cpu().numpy()
+        # Ensure action is a 1D array, especially when using vectorized environments
+        action = np.atleast_1d(action)
+        return action, states
+
 
 model_factory = {
     'linear': GaussianPolicy,

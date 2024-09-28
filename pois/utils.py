@@ -1,20 +1,27 @@
 import torch
 import pdb
-def collect_trajectories(env, policy, episodes_per_iteration):
+import gym
+def collect_trajectories(env, policy, episodes_per_iteration, device='cpu'):
     trajectories = []
+    returns = []
+    device = torch.device(device)
     for _ in range(episodes_per_iteration):
         state, _ = env.reset()
         traj = []
         done = False
         truncated = False
+        episode_return = 0.0  # Initialize return for the episode
         while not (done or truncated):
-            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
             action, log_prob = policy.sample_action(state_tensor)
-            next_state, reward, done, truncated, _ = env.step(torch.argmax(action.detach()).item())
-            traj.append((state, action, reward, log_prob)) # log_prob is 0 for p-pois since it is deterministic
+            action_value = torch.argmax(action.detach()).item() if isinstance(env.action_space, gym.spaces.Discrete) else action.detach().numpy()
+            next_state, reward, done, truncated, _ = env.step(action_value)
+            traj.append((state, action, reward, log_prob))  # Log the transition
             state = next_state
+            episode_return += reward  # Accumulate reward
         trajectories.append(traj)
-    return trajectories
+        returns.append(episode_return)  # Store return for the episode
+    return trajectories, returns
 
 def line_search(policy, policy_old, loss_fn, trajectories, initial_alpha=1.0, c1=1e-4, tau=0.5, max_iters=10):
     """

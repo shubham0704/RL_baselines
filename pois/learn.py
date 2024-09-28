@@ -1,6 +1,6 @@
 import torch
-from losses import p_pois_loss, a_pois_loss
-from utils import collect_trajectories, parabolic_line_search
+from .losses import p_pois_loss, a_pois_loss
+from .utils import collect_trajectories, parabolic_line_search
 # from pois.models import GaussianPolicy
 import torch.optim as optim
 import gym
@@ -28,7 +28,7 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
                                   num_iterations=10, 
                                   num_offline_iterations=10,
                                   episodes_per_iteration=10):
-    
+    return_vals = []
     for j in range(num_iterations):
         # Collect trajectories using old hyperpolicy
         trajectories = []
@@ -36,9 +36,10 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
         for i in range(episodes_per_iteration):
             theta = hyperpolicy_old.sample_theta()
             hyperpolicy_new.set_theta(theta)  # Set new policy to sample theta
-            trajectory = collect_trajectories(env, hyperpolicy_new, 1)
+            trajectory, return_val = collect_trajectories(env, hyperpolicy_new, 1)
             trajectories += trajectory
             thetas.append(theta)
+            return_vals += return_val
         
         # Perform offline optimization
         for k in range(num_offline_iterations):
@@ -95,20 +96,21 @@ def train_p_pois_with_line_search(env, hyperpolicy_old, hyperpolicy_new,
         hyperpolicy_old.load_state_dict(hyperpolicy_new.state_dict())
         
         print(f'Online Iteration {j}, Offline Iteration {k}, Loss: {loss.item()}, Alpha_mean: {alpha_k_mean}, Alpha_sigma: {alpha_k_sigma if grad_sigma is not None else None}')
-    return hyperpolicy_new
+    return hyperpolicy_new, return_vals
 
 def train_a_pois_with_line_search(env, policy_old, policy_new, 
                                 gamma=1.0, lambda_coef=0.01, 
                                 num_iterations=10, 
                                 num_offline_iterations=10,
-                                episodes_per_iteration=10):    
+                                episodes_per_iteration=10):
+    return_vals = []
     optimizer = torch.optim.Adam(policy_new.parameters(), lr=1e-3)  # Initial learning rate
     
     for j in range(num_iterations):
         # Online phase: Collect trajectories using the current policy
-        trajectories = collect_trajectories(env, policy_old, 
+        trajectories, returns = collect_trajectories(env, policy_old, 
                                             episodes_per_iteration=episodes_per_iteration)
-
+        return_vals += returns
         for k in range(num_offline_iterations):
             # Compute the gradient of the A-POIS loss w.r.t. policy parameters
             def loss_fn(theta):
@@ -143,9 +145,9 @@ def train_a_pois_with_line_search(env, policy_old, policy_new,
         # torch.nn.utils.clip_grad_norm_(policy_new.parameters(), max_norm=1.0)
         # Update the old policy to match the new one at the end of this iteration
         policy_old.load_state_dict(policy_new.state_dict())
-        
-        print(f'Online Iteration {j}, Offline Iteration {k}, Loss: {loss.item()}, Alpha: {alpha_k}')
-    return policy_new
+        if j % 10 == 0:
+            print(f'Online Iteration {j}, Offline Iteration {k}, Loss: {loss.item()}, Alpha: {alpha_k}')
+    return policy_new, return_vals
 
 if __name__ == '__main__':
     env = gym.make('CartPole-v1')

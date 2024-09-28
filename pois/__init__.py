@@ -1,0 +1,1 @@
+from .pois import method_factory
