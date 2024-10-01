@@ -21,7 +21,7 @@ We should also support a tensorboard logging of the returns.
 
 Ideally, we should have the same interface for all the methods.
 """
-methods_to_evaluate = ['a-pois', 'p-pois', 'ppo', 'trpo']
+methods_to_evaluate = ['a-pois']
 class EpisodeReturnCallback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
@@ -52,7 +52,7 @@ evaluate_config = {
                 "train_kwargs": {
                     "num_offline_iterations": 10,
                     "num_iterations": 50,
-                    "episodes_per_iteration": 100
+                    "episodes_per_iteration": 10
                 }
             },
             "a-pois": {
@@ -62,7 +62,7 @@ evaluate_config = {
                 "train_kwargs": {
                     "num_offline_iterations": 10,
                     "num_iterations": 50,
-                    "episodes_per_iteration": 100
+                    "episodes_per_iteration": 10
                 }
             },
             "trpo": {
@@ -73,7 +73,7 @@ evaluate_config = {
                     }
                 },
                 "train_kwargs": {
-                    "total_timesteps": 5000,
+                    "total_timesteps": 500,
                     "callback": EpisodeReturnCallback()
                 }
             },
@@ -85,7 +85,7 @@ evaluate_config = {
                     },
                 },
                 "train_kwargs": {
-                    "total_timesteps": 5000,
+                    "total_timesteps": 500,
                     "callback": EpisodeReturnCallback(),
                 }
             }
@@ -97,22 +97,22 @@ evaluate_config = {
         "method":{
             "p-pois": {
                 "init_kwargs": {
-                    "policy": "MlpPolicy",
+                    "policy": "mlp",
                 },
                 "train_kwargs": {
                     "num_offline_iterations": 20,
                     "num_iterations": 50,
-                    "episodes_per_iteration": 100
+                    "episodes_per_iteration": 10
                 }
             },
             "a-pois": {
                 "init_kwargs": {
-                    "policy": "MlpPolicy",
+                    "policy": "mlp",
                 },
                 "train_kwargs": {
                     "num_offline_iterations": 20,
                     "num_iterations": 50,
-                    "episodes_per_iteration": 100
+                    "episodes_per_iteration": 10
                 }
             },
             "trpo": {
@@ -123,7 +123,7 @@ evaluate_config = {
                     }
                 },
                 "train_kwargs": {
-                    "total_timesteps": 5000,
+                    "total_timesteps": 500,
                     "callback": EpisodeReturnCallback(),
                 }
             },
@@ -135,7 +135,7 @@ evaluate_config = {
                     },
                 },
                 "train_kwargs": {
-                    "total_timesteps": 5000,
+                    "total_timesteps": 500,
                     "callback": EpisodeReturnCallback(),
                 }
                 }
@@ -219,4 +219,4 @@ df = pd.DataFrame({
 })
 
 print(df)
-df.to_csv("returns.csv", index=False)
+df.to_csv("returns_pois.csv", index=False)
