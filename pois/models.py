@@ -166,7 +166,91 @@ class MLPPolicy(PolicyNetwork):
         device = torch.device('cpu')
         super(MLPPolicy, self).__init__(mean, method, fixed_std, action_dim, device)
         
+        
+class VAEPolicy(PolicyNetwork):
+    def __init__(self, state_dim, action_dim, fixed_std=True, method='p-pois'):
+        """
+        State: x
+        Action: [mean(x), std(x) (q(z|x) ~ N(mean(x), std(x))), \hat x (reconstruction output of VAE)]
+        """
+        
+        self.encoder = nn.Sequential(
+            nn.Linear(state_dim, 100),
+            nn.ReLU(),
+            nn.Linear(100, 50),
+            nn.ReLU(),
+        )
+        
+        self.mean = nn.Linear(50, action_dim)
+        self.log_std = nn.Linear(50, action_dim)
+        
+        self.decoder = nn.Sequential(
+            nn.Linear(action_dim, 50),
+            nn.ReLU(),
+            nn.Linear(50, 100),
+            nn.ReLU(),
+            nn.Linear(100, state_dim)
+        )
+        
+        device = torch.device('cpu')
+        super(VAEPolicy, self).__init__(self.mean, method, fixed_std, action_dim, device)
+        
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+    
+    def forward(self, state):
+        encoded = self.encoder(state)
+        mean = self.mean(encoded)
+        log_std = self.log_std(encoded)
+        std = torch.exp(log_std)
+        return mean, std
+    
+    def sample_action(self, state):
+        mean, std = self.forward(state)
+        dist = torch.distributions.Normal(mean, std)
+        z = dist.rsample()  # Use reparameterization trick
+        reconstruction = self.decoder(z)
+        
+        if self.method == 'p-pois':
+            action = torch.cat([mean, std, reconstruction], dim=-1)
+            return action, 0
+        else:
+            action = torch.cat([z, reconstruction], dim=-1)
+            return action, dist.log_prob(z).sum()
+    
+    def predict(self, observations, states=None, episode_starts=None, deterministic=True):
+        if not isinstance(observations, torch.Tensor):
+            observations = torch.FloatTensor(observations)
+        if observations.dim() == 1:
+            observations = observations.unsqueeze(0)
+        
+        with torch.no_grad():
+            mean, std = self.forward(observations)
+            if deterministic or self.method == 'p-pois':
+                z = mean
+            else:
+                dist = torch.distributions.Normal(mean, std)
+                z = dist.sample()
+            reconstruction = self.decoder(z)
+            action = torch.cat([z, reconstruction], dim=-1)
+        
+        action = action.detach().cpu().numpy()
+        return np.atleast_1d(action), states
+    
+    def get_mean(self):
+        return torch.cat([param.flatten() for param in self.parameters()])
+    
+    def set_theta(self, theta_mean, theta_log_std=None):
+        with torch.no_grad():
+            start = 0
+            for param in self.parameters():
+                end = start + param.numel()
+                param.copy_(theta_mean[start:end].view_as(param))
+                start = end
+
+# Update the model_factory dictionary
 model_factory = {
     'linear': GaussianPolicy,
-    'mlp': MLPPolicy
+    'mlp': MLPPolicy,
+    'vae': VAEPolicy
 }
