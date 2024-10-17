@@ -17,4 +17,6 @@ In progress -
 
 ## Results for 500 iterations
 
-![Image]()
+We show evaluation results against PPO and TRPO in the linear Gaussian and MLP Gaussian Policy with learnable mean and fixed variance.
+
+![Image](pois_performance.png)
